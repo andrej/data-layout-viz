@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <script>
+            // /////////////////////////////////////////////////////////////////
+            // Globals
+            // /////////////////////////////////////////////////////////////////
+
+            // Data Layout (Either provided by user or calculated, do not set)
+            var sequence = []; // populated by calculate_sequence(); sequence of
+                               // indices as accessed by the given wraps/strides
+            var reverse_sequence = {}; // maps an input matrix index to a list
+                                       // of offsets at which it is accessed in 
+                                       // the sequence (iterations)
+            var transforms = []; // input wraps/strides
+            var dimensions = []; // Size of input matrix [cols, rows]
+
+            // Drawing globals (do not set)
+            var canvas_dimensions = []; // Size of canvas in pixels
+            var ctx = undefined;
+            var animation_start_time = 0;
+            var requested_frames = [];
+
+            // Drawing configuration
+            var animation_duration = 10000;
+            var pad = 2;
+            var hsl_start = [340, 100, 20];
+            var hsl_end   = [245, 100, 20];
+
+
+            // /////////////////////////////////////////////////////////////////
+            // Data Layout Transformation Business Logic
+            // /////////////////////////////////////////////////////////////////
+            function recursive_transform(dimensions, index, accum) {
+                if(!dimensions || dimensions.length == 0) {
+                    return accum;
+                }
+                const [wrap, stride]   = dimensions[0];
+                return recursive_transform(dimensions.slice(1), 
+                                           Math.trunc(index / wrap),
+                                           accum + Math.trunc(index % wrap) * stride);
+            }
+            function max_index(dimensions) {
+                if(!dimensions || dimensions.length == 0) {
+                    return 0;
+                }
+                wrap   = dimensions[0][0];
+                stride = dimensions[0][1];
+                return wrap*stride + max_index(dimensions.slice(1));
+            }
+            function max_iterations(dimensions) {
+                return dimensions.reduce((product, dimension) => product*dimension[0], 1);
+            }
+            function calculate_sequence() {
+                let size = dimensions[0]*dimensions[1];
+                let bound = transforms.reduce((max, transform) => Math.max(max, max_iterations(reversed(transform))), 0);
+                clear(sequence);
+                for(let i = 0; i < bound; i++) {
+                    let index = i;
+                    for(const transform of transforms) {
+                        index = recursive_transform(reversed(transform), index, 0);
+                    }
+                    sequence.push(index);
+                    if(index in reverse_sequence) {
+                        reverse_sequence[index].push(i);
+                    } else {
+                        reverse_sequence[index] = [i];
+                    }
+                }
+                console.log(sequence);
+                return true;
+            }
+            // Code output
+            function loop_repr_of_dimensions(dimensions) {
+                const loop_vars = ['i', 'j', 'k', 'l', 'm', 'n', 'o'];
+                if(dimensions.length > loop_vars.length) {
+                    return error();
+                }
+                let out = '';
+                for(let i = 0; i < dimensions.length; i++) {
+                    let [wrap, stride] = dimensions[i];
+                    out += '  '.repeat(i);
+                    out += 'for ' + loop_vars[i] + ' = 0..<span>' + wrap + '</span>:\n'
+                }
+                out += '  '.repeat(dimensions.length);
+                out += 'read buf[';
+                for(let i = 0; i < dimensions.length; i++) {
+                    let [wrap, stride] = dimensions[i];
+                    if(i > 0) {
+                        out += '  '.repeat(dimensions.length) + '        +';
+                    }
+                    out += loop_vars[i] + '*<span>' + stride + '</span>';
+                    if(i < dimensions.length-1) {
+                        out += '\n';
+                    }
+                }
+                out += ']';
+                return out;
+            }
+            function loop_repr_of_transforms(transforms) {
+                let out = '';
+                for(const transform of transforms) {
+                    out += loop_repr_of_dimensions(transform);
+                }
+                return out;
+            }
+
+            // /////////////////////////////////////////////////////////////////
+            // Utility Functions
+            // /////////////////////////////////////////////////////////////////
+            function reversed(array) {
+                return array.slice().reverse();
+            }
+            function clear(array) {
+                array.length = 0;
+            }
+            function error(msg) {
+                if(!msg) {
+                    msg = 'Something went wrong. Please reload the page.';
+                }
+                alert(msg);
+                return false;
+            }
+            function interpolate_hsl(start, end, i) {
+                const [ha, sa, la] = start;
+                const [hb, sb, lb] = end;
+                const [h, s, l] = [Math.round(ha+(hb-ha)*i), 
+                                   Math.round(sa+(sb-sa)*i), 
+                                   Math.round(la+(lb-la)*i)]
+                if(h < 0) {
+                    h = 360 + h;
+                }
+                return 'hsla('+h+','+s+'%,'+l+'%,1)';
+            }
+
+            // /////////////////////////////////////////////////////////////////
+            // Drawing and Animation
+            // /////////////////////////////////////////////////////////////////
+
+            // Drawing Helpers
+            function are_manhattan_neighbors([Ax, Ay], [Bx, By]) {
+                return (Ay == By && Math.abs(Ax-Bx) == 1)
+                       || (Ax == Bx && Math.abs(Ay-By) == 1);
+            }
+            function project(x, y) {
+                // Projects X Y coordinates in our coordinate system onto the
+                // canvas
+                const [n_cols, n_rows] = dimensions;
+                const y_scale = (canvas_dimensions[0] - 2*pad)/(n_rows + 1);
+                const x_scale = (canvas_dimensions[1] - 2*pad)/(n_cols + 1);
+                const scale = Math.min(x_scale, y_scale);
+                return [x*scale+pad, y*scale+pad];
+            }
+            function inv_project(x, y) {
+                // Map canvas coordinates to our coordinate system; used for
+                // mouse hover coordinates
+                const [n_cols, n_rows] = dimensions;
+                const y_scale = (canvas_dimensions[0] - 2*pad)/(n_rows + 1);
+                const x_scale = (canvas_dimensions[1] - 2*pad)/(n_cols + 1);
+                const scale = Math.min(x_scale, y_scale);
+                return [(x-pad)/scale, (y-pad)/scale];
+            }
+            function relative_mouse_position(mouse_event) {
+                const rect = mouse_event.target.getBoundingClientRect();
+                const x = mouse_event.clientX - rect.left;
+                const y = mouse_event.clientY - rect.top;
+                return [x, y];
+            }
+
+            // Main Drawing
+            function draw_sequence(upto = -1) {
+                // Animation-specific stuff: to draw everything at once, just
+                // set upto to -1; if upto is not negative, only draw the first 
+                // `upto` indices. If it is a fraction, draw a partial line for
+                // the last index.
+                if(upto < 0) {
+                    upto = sequence.length;
+                }
+                const interpolate_last = Math.ceil(upto) != upto;
+                let fraction = 1;
+                if(interpolate_last) {
+                    fraction = upto % 1;
+                    upto = Math.ceil(upto);
+                }
+
+                const [n_cols, n_rows] = dimensions;
+                let last_index = -1;
+                let [last_x, last_y] = [0, 0];
+                //let [frac_last_x, frac_last_y] = [0, 0];
+                ctx.clearRect(0, 0, canvas_dimensions[0], canvas_dimensions[1]);
+                for(let i = 0; i < sequence.length; i++) {;
+                    // Calculate position
+                    const index = sequence[i];
+                    const y = Math.trunc(index / n_cols);
+                    const x = Math.trunc(index % n_cols);
+                    let frac_y = y;
+                    let frac_x = x;
+
+                    // Animation-specifics
+                    if(interpolate_last) {
+                        if(i == upto-1) { // last iteration before upto
+                            frac_y = last_y + fraction*(y-last_y);
+                            frac_x = last_x + fraction*(x-last_x);
+                        }
+                    }
+                    
+                    // Actual drawing; solid line for memory-adjacent elements
+                    // accessed in-sequence; dashed line if we jump in memory.
+                    // Non-manhattan neighbors that are technically memory 
+                    // adjacent looks weird if we draw solidly, so dash those
+                    // too
+                    ctx.beginPath();
+                    if(i < upto) {
+                        ctx.strokeStyle = interpolate_hsl(hsl_start, hsl_end,
+                                                          i/sequence.length);
+                    } else {
+                        ctx.strokeStyle = "#999";
+                    }
+                    ctx.moveTo(...project(last_x, last_y));
+                    ctx.lineTo(...project(frac_x, frac_y));
+                    if(index != last_index+1
+                       || !are_manhattan_neighbors([last_x, last_y], [x, y])) {
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([1,2]);
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([4,2]);
+                    } else {
+                        ctx.lineWidth = 3;
+                        ctx.setLineDash([]);
+                    }
+                    ctx.stroke();
+                    last_index = index;
+                    [last_x, last_y] = [x, y];
+                    //[frac_last_x, frac_last_y] = [frac_x, frac_y];
+                }
+            }
+            function animate_sequence() {
+                const progress_per_ms = sequence.length / animation_duration;
+                const upto = Math.min((Date.now() - animation_start_time) * progress_per_ms + 0.1,
+                                      sequence.length);
+                draw_sequence(upto);
+                if(upto < sequence.length) {
+                    requested_frames.push(window.requestAnimationFrame(animate_sequence));
+                }
+            }
+            function start_animation() {
+                animation_start_time = Date.now();
+                requested_frames.push(window.requestAnimationFrame(animate_sequence));
+            }
+            function cancel_animation() {
+                for(const frame_request of requested_frames) {
+                    window.cancelAnimationFrame(frame_request);
+                }
+                animation_frame = 0;
+            }
+
+
+            // /////////////////////////////////////////////////////////////////
+            // Interactivity / UI
+            // /////////////////////////////////////////////////////////////////
+
+            // Input Processing
+            function read_input_dimensions() {
+                width_input = document.getElementById('width');
+                height_input = document.getElementById('height');
+                if(!width_input) {
+                    return error();
+                }
+                if(!height_input) {
+                    return error();
+                }
+                width = parseInt(width_input.value);
+                height = parseInt(height_input.value);
+                if(0 >= width) {
+                    return error('Width must be a positive number. (Got '+width+'.)');
+                }
+                if(0 >= height) {
+                    return error('Height must be a positive number. (Got '+width+'.)');
+                }
+                dimensions = [width, height];
+                return true;
+            }
+            function read_input_transforms() {
+                // The following relies heavily on the fact that the iteration
+                // over elements is in order of definition in the document. This
+                // gives us the dimensions and transforms in the right order.
+                transform_inputs = document.getElementsByClassName('transform');
+                clear(transforms)
+                for(const transform_input of transform_inputs) {
+                    stride_inputs = transform_input.getElementsByClassName('stride');
+                    wrap_inputs = transform_input.getElementsByClassName('wrap');
+                    if(stride_inputs.length != wrap_inputs.length) {
+                        return error();
+                    } 
+                    if(0 == stride_inputs.length) {
+                        return true;
+                    }
+                    transform = []
+                    for(const wrap_input of wrap_inputs) {
+                        const wrap = parseInt(wrap_input.value)
+                        if(0 >= wrap) {
+                            return error('Wrap ' + wrap_input.id + ' must be a positive number. (Got ' + wrap +'.)');
+                        }
+                        transform.push([wrap, 0])
+                    }
+                    for(var i = 0; i < stride_inputs.length; i++) {
+                        var stride_input = stride_inputs[i];
+                        const stride = parseInt(stride_input.value);
+                        if(0 > stride) {
+                            return error('Stride ' + stride_input.id + ' must be a non-negative number. (Got ' + stride + '.)');
+                        }
+                        transform[i][1] = stride;
+                    }
+                    transforms.push(transform);
+                }
+                return true;
+            }
+            function read_inputs() {
+                return read_input_dimensions() && read_input_transforms();
+            }
+
+            // Event handlers
+            function change(e=undefined) {
+                if(!read_inputs()) {
+                    return;
+                }
+                if(!calculate_sequence()) {
+                    return;
+                }
+                document.getElementById("code").innerHTML = 
+                    loop_repr_of_transforms(transforms);
+                cancel_animation();
+                start_animation();
+            }
+            function hover(e) {
+                let [x, y] = relative_mouse_position(e);
+                [x, y] = inv_project(x, y);
+                x = Math.round(x);
+                y = Math.round(y);
+                const [n_cols, n_rows] = dimensions;
+                const index = x + y*n_cols;
+                if(index in reverse_sequence) {
+                    cancel_animation();
+                    // TODO: Give users a choice up to which repetition of the
+                    // element should be drawn if the same element is repeated.
+                    const upto = reverse_sequence[index][0];
+                    draw_sequence(upto);
+                }
+            }
+
+            // Initialization
+            function init() {
+                inputs = document.getElementsByTagName('input');
+                for(input of inputs){
+                    input.addEventListener('change', change);
+                }
+                const canvas = document.getElementById('canvas');
+                canvas_dimensions = [canvas.width, canvas.height];
+                ctx = canvas.getContext('2d');
+                canvas.addEventListener('mousemove', hover);
+                change();
+            }
+
+            window.addEventListener('load', init);
+        </script>
+        <style>
+            body {
+                font-family: Helvetica, Arial, sans-serif;
+                padding: 50px;
+            }
+            h1 {
+                margin-bottom: 30px;
+            }
+            #visualization {
+                min-width: 512px; float: left;
+            }
+            label, input {
+                display: block;
+            }
+            label {
+                font-size: 0.9em;
+                padding: 10px 1px 1px 1px;
+            }
+            input {
+                text-align: right;
+                font-size: 1.1em;
+                font-family: Consolas, monospace;
+            }
+            #controls {
+                min-width: 100px; float: left;
+            }
+            #controls input {
+                max-width: 90%;
+            }
+            .strides { 
+                width: 45%; padding-right: 5%; float: left;
+            }
+            .wraps {
+                width: 45%; padding-left: 5%; float: right;
+            }
+            .stride, .wrap {
+                width: 4em;
+            }
+            .transform {
+                display: block;
+                clear: both;
+                overflow: hidden;
+            }
+            #code {
+                margin: 20px 0;
+                padding: 10px;
+                border: 2px solid #000;
+                clear: both;
+                font-family: Consolas, monospace;
+                color: #666;
+                white-space: pre;
+            }
+            #code span {
+                color: #000;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Data Layout Transformation Visualization</h1>
+        <div id="visualization">
+            <canvas id="canvas" width="512" height="512"></canvas>
+        </div>
+        <div id="controls">
+            <div class="settings">
+                <label for="width">Input Width (# Columns)</label>
+                <input type="number" id="width" value="16" />
+                <label for="height">Input Height (# Rows)</label>
+                <input type="number" id="height" value="16" />
+            </div>
+            <div class="transform">
+                <div class="strides">
+                    <label for="stride_3">Stride 4</label>
+                    <input type="number" id="stride_3" value="128" class="stride" />
+                    <label for="stride_2">Stride 3</label>
+                    <input type="number" id="stride_2" value="8" class="stride" />
+                    <label for="stride_1">Stride 2</label>
+                    <input type="number" id="stride_1" value="16" class="stride" />
+                    <label for="stride_0">Stride 1</label>
+                    <input type="number" id="stride_0" value="1" class="stride" />
+                </div>
+                <div class="wraps">
+                    <label for="wrap_3">Wrap 4</label>
+                    <input type="number" id="wrap_3" value="2" class="wrap" />
+                    <label for="wrap_2">Wrap 3</label>
+                    <input type="number" id="wrap_2" value="2" class="wrap" />
+                    <label for="wrap_1">Wrap 2</label>
+                    <input type="number" id="wrap_1" value="8" class="wrap" />
+                    <label for="wrap_0">Wrap 1</label>
+                    <input type="number" id="wrap_0" value="8" class="wrap" />
+                </div>
+            </div>
+            <p id="code"></p>
+        </div>
+    </body>
+</html>
