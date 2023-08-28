@@ -1,7 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
     <head>
         <meta charset="utf-8" />
+        <script src="util.js"></script>
+        <script src="transformations.js"></script>
+        <script src="drawing.js"></script>
+        <script src="ui.js"></script>
         <script>
             // /////////////////////////////////////////////////////////////////
             // Globals
@@ -14,7 +18,8 @@
             var reverse_sequence = {}; // maps an input matrix index to a list
                                        // of offsets at which it is accessed in 
                                        // the sequence (iterations)
-            var transforms = []; // input wraps/strides
+            var transforms = [[[4, 64], [4, 4], [4, 16], [4, 1]]]; 
+                              // input wraps/strides
             var matrix_dims = []; // Size of input matrix [cols, rows] in bytes
             var word_size = 4;
 
@@ -45,526 +50,13 @@
             let show_repetitions = false;
 
 
-            // /////////////////////////////////////////////////////////////////
-            // Data Layout transform Business Logic
-            // /////////////////////////////////////////////////////////////////
-            function recursive_transform(transform, index, accum) {
-                if(!transform || transform.length == 0) {
-                    return accum;
-                }
-                const [wrap, stride]   = transform[0];
-                return recursive_transform(transform.slice(1), 
-                                           Math.trunc(index / wrap),
-                                           accum + Math.trunc(index % wrap) * stride);
-            }
-            function max_index(transform) {
-                if(!transform || transform.length == 0) {
-                    return 0;
-                }
-                wrap   = transform[0][0];
-                stride = transform[0][1];
-                return wrap*stride + max_index(transform.slice(1));
-            }
-            function max_iterations(transform) {
-                return transform.reduce(
-                    (product, dimension) => product*dimension[0], 1);
-            }
-            function calculate_sequence() {
-                let bound = transforms.reduce(
-                    (max, transform) => 
-                    Math.max(max, max_iterations(reversed(transform))), 0);
-                clear(sequence);
-                reverse_sequence = {};
-                for(let i = 0; i < bound; i++) {
-                    let index = i;
-                    for(const transform of transforms) {
-                        index = recursive_transform(reversed(transform), 
-                                                    index, 0);
-                    }
-                    index *= word_size;
-                    sequence.push(index);
-                    if(index in reverse_sequence) {
-                        reverse_sequence[index].push(i);
-                    } else {
-                        reverse_sequence[index] = [i];
-                    }
-                }
-                return true;
-            }
-            function offset_to_matrix_coords(offset) {
-                const n_cols_bytes = matrix_dims[0];
-                const row = Math.trunc(offset / n_cols_bytes);
-                const col = Math.trunc(offset % n_cols_bytes);
-                return [col, row];
-            }
-            // Code output
-            function loop_repr_of_transform(tr) {
-                const loop_vars = ['i', 'j', 'k', 'l', 'm', 'n', 'o'];
-                if(transform.length > loop_vars.length) {
-                    return error();
-                }
-                let out = '';
-                for(let i = 0; i < transform.length; i++) {
-                    let [wrap, stride] = transform[i];
-                    out += '  '.repeat(i);
-                    out += 'for ' + loop_vars[i] + ' = 0..<span>' + wrap + '</span>:\n'
-                }
-                out += '  '.repeat(transform.length);
-                out += 'read buf[';
-                for(let i = 0; i < transform.length; i++) {
-                    let [wrap, stride] = transform[i];
-                    if(i > 0) {
-                        out += '  '.repeat(transform.length) + '        +';
-                    }
-                    out += loop_vars[i] + '*<span>' + stride + '</span>';
-                    if(i < transform.length-1) {
-                        out += '\n';
-                    }
-                }
-                out += ']';
-                return out;
-            }
-            function loop_repr_of_transforms(transforms) {
-                let out = '';
-                for(const transform of transforms) {
-                    out += loop_repr_of_transform(transform);
-                }
-                return out;
-            }
-            function round_to_word(offset) {
-                return Math.trunc(offset/word_size)*word_size;
-            }
-
-            // /////////////////////////////////////////////////////////////////
-            // Utility Functions
-            // /////////////////////////////////////////////////////////////////
-            function reversed(array) {
-                return array.slice().reverse();
-            }
-            function clear(array) {
-                array.length = 0;
-            }
-            function error(msg) {
-                if(!msg) {
-                    msg = 'Something went wrong. Please reload the page.';
-                }
-                alert(msg);
-                return false;
-            }
-            function interpolate_hsl(start, end, i) {
-                const [ha, sa, la] = start;
-                const [hb, sb, lb] = end;
-                const [h, s, l] = [Math.round(ha+(hb-ha)*i), 
-                                   Math.round(sa+(sb-sa)*i), 
-                                   Math.round(la+(lb-la)*i)]
-                if(h < 0) {
-                    h = 360 + h;
-                }
-                return 'hsla('+h+','+s+'%,'+l+'%,1)';
-            }
-            function are_manhattan_neighbors([Ax, Ay], [Bx, By], threshold=1) {
-                return (Ay == By && Math.abs(Ax-Bx) <= threshold)
-                       || (Ax == Bx && Math.abs(Ay-By) <= threshold);
-            }
-
-            // /////////////////////////////////////////////////////////////////
-            // Drawing and Animation
-            // /////////////////////////////////////////////////////////////////
-
-            // Drawing Helpers
-            function update_projection_parameters() {
-                const [width, height] = canvas_size;
-                const [n_cols, n_rows] = matrix_dims;
-                const y_scale = (height - 2*projection_pad)/n_rows;
-                const x_scale = (width - 2*projection_pad)/n_cols;
-                projection_scale = Math.min(x_scale, y_scale);
-            }
-            function project(x, y) {
-                // We have a coordinate system for bytes and words, projected
-                // onto the canvas using this function
-                return [x*projection_scale+projection_pad, 
-                        y*projection_scale+projection_pad];
-            }
-            function inv_project(x, y) {
-                // Map matrix coordinates (bytes) to our coordinate system; used 
-                // for mouse hover coordinates
-                return [(x-projection_pad)/projection_scale, 
-                        (y-projection_pad)/projection_scale];
-            }
-            function relative_mouse_position(mouse_event) {
-                const rect = mouse_event.target.getBoundingClientRect();
-                const x = mouse_event.clientX - rect.left;
-                const y = mouse_event.clientY - rect.top;
-                return [x, y];
-            }
-            function rect(x1, y1, x2, y2) {
-                // Alternative rectangle drawing function that instead of
-                // width and height takes coordinates
-                return ctx.rect(x1, y1, x2-x1, y2-y1);
-            }
-            function stroke_with_halo(halo_width) {
-                const stroke_style = ctx.strokeStyle;
-                const line_width = ctx.lineWidth;
-                const line_dash = ctx.getLineDash();
-                ctx.lineWidth = halo_width;
-                ctx.strokeStyle = '#fff';
-                ctx.setLineDash([]);
-                ctx.stroke();
-                ctx.lineWidth = line_width;
-                ctx.strokeStyle = stroke_style;
-                ctx.setLineDash(line_dash);
-                ctx.stroke();
-            }
-
-            // Main Drawing
-            function draw_grid(highlight=undefined) {
-                const [n_cols, n_rows] = matrix_dims;
-                if(highlight) {
-                    let [col, row] = highlight;
-                    col = Math.trunc(col/word_size) * word_size;
-                    rect(...project(col, 0), 
-                         ...project(col+word_size, n_rows));
-                    rect(...project(0, row),
-                         ...project(n_cols, row+1));
-                    ctx.fillStyle = grid_highlight_fill_style;
-                    ctx.fill();
-                }
-                // Byte lines
-                ctx.beginPath();
-                ctx.setLineDash([]);
-                ctx.lineWidth = grid_byte_line_width;
-                ctx.strokeStyle = grid_byte_stroke_style;
-                for(let i = 0; i < n_cols*word_size; i++) {
-                    if(i%word_size == 0) {
-                        continue;
-                    }
-                    ctx.moveTo(...project(i, 0));
-                    ctx.lineTo(...project(i, n_rows));
-                }
-                ctx.stroke();
-                // Word lines 
-                ctx.beginPath();
-                ctx.setLineDash([]);
-                ctx.lineWidth = grid_word_line_width;
-                ctx.strokeStyle = grid_word_stroke_style;
-                // This does not support the case where a word is longer
-                // than a row of our matrix, so each horizontal line is a solid
-                // line.
-                for(let i = 0; i < n_rows; i++) {
-                    ctx.moveTo(...project(0, i));
-                    ctx.lineTo(...project(n_cols*word_size, i));   
-                }
-                // Vertical word lines
-                const n_cols_words = Math.trunc(n_cols/word_size);
-                for(let i = 0; i < n_cols_words; i++) {
-                    ctx.moveTo(...project(i*word_size, 0));
-                    ctx.lineTo(...project(i*word_size, n_rows));
-                }
-                ctx.stroke();
-            }
-            function draw_sequence(upto = -1) {
-                // Animation-specific stuff: to draw everything at once, just
-                // set upto to -1; if upto is not negative, only draw the first 
-                // `upto` indices. If it is a fraction, draw a partial line for
-                // the last index.
-                if(upto < 0) {
-                    upto = sequence.length;
-                }
-                let fraction = 1;
-                if(Math.ceil(upto) != upto) {
-                    fraction = upto % 1;
-                    upto = Math.ceil(upto);
-                }
-
-                let [n_cols, n_rows] = matrix_dims;
-                let last_index = -1;
-                let [last_x, last_y] = [0, 0];
-                let index_counts = {};
-                for(let i = 0; i < sequence.length; i++) {;
-                    // Calculate position
-                    const index = sequence[i];
-                    let [x, y] = offset_to_matrix_coords(index);
-
-                    // We can have multiple reads of the same matrix element;
-                    // if this happens, we slightly offset the y coordinate of
-                    // that read so it does not overlap with the others of the
-                    // same element
-                    if(!index_counts[index]) {
-                        index_counts[index] = 1;
-                    } else if(!show_repetitions) {
-                        break;
-                    }
-                    if(show_repetitions) {
-                        const n_repeats = reverse_sequence[index].length;
-                        const y_offs = index_counts[index] * (0.75/(n_repeats+1));
-                        index_counts[index]++;
-                        y += y_offs + 0.125;
-                    } else {
-                        y += 0.5;
-                    }
-                    
-                    // Actual drawing; solid line for memory-adjacent elements
-                    // accessed in-sequence; dashed line if we jump in memory.
-                    // Non-manhattan neighbors that are technically memory 
-                    // adjacent looks weird if we draw solidly, so dash those
-                    // too
-                    if(i <= upto) {
-                        ctx.strokeStyle = interpolate_hsl(hsl_start, hsl_end,
-                                                          i/sequence.length);
-                    } else {
-                        ctx.strokeStyle = inactive_stroke_style;
-                    }
-                    if(i > 0) {
-                        draw_connection(last_index, index, [last_x, last_y], 
-                                        [x, y],
-                                        (i == upto ? 
-                                            Math.min(1, 2*fraction) : 1));
-                    }
-                    draw_word(index, [x, y],
-                              (i == upto ? 
-                               Math.max(0, 2*fraction-1) : 1));
-                    last_index = index;
-                    [last_x, last_y] = [x, y];
-                }
-            }
-            function draw_connection(index_1, index_2, p_1, p_2, fraction) {
-                let [x1, y1] = p_1;
-                let [x2, y2] = p_2;
-                x1 = x1 + (word_size-1) + 0.66; // room for word
-                x2 = x2 + 0.33;
-                const is_consecutive_read = 
-                    (index_2 == index_1 + word_size
-                     && are_manhattan_neighbors([x1, y1], [x2, y2], word_size));
-                //x2 = x1 + fraction*(x2-x1);
-                //y2 = y1 + fraction*(y2-y1);
-                if(!is_consecutive_read) {
-                    ctx.setLineDash(connection_line_dash);
-                    ctx.lineWidth = connection_line_width;
-                    ctx.beginPath();
-                    ctx.moveTo(...project(x1, y1));
-                    const x_diff_sgn = (x1-x2 < 0 ? -1 : 1)
-                    const y_diff = y1-y2
-                    if(Math.abs(y1-y2) < 0.75) { // Horizontal jump; draw an arc
-                        ctx.bezierCurveTo(...project(x1-x_diff_sgn*0.33, y1-0.33),
-                                          ...project(x2+x_diff_sgn*0.33, y1-0.33),
-                                          ...project(x2, y2));
-                    } else { // Jump includes vertical component
-                        ctx.bezierCurveTo(...project(x1, y1-0.33*y_diff),
-                                          ...project(x2, y2+0.33*y_diff),
-                                          ...project(x2, y2));
-                    }
-                    stroke_with_halo(4);
-                } else {
-                    ctx.setLineDash(word_line_dash);
-                    ctx.lineWidth = word_line_width;
-                    ctx.beginPath();
-                    ctx.moveTo(...project(x1, y1));
-                    ctx.lineTo(...project(x2, y2));
-                    ctx.stroke();
-                }
-            }
-            function draw_word(index, p, fraction) {
-                let [x1, y1] = p;
-                x1 += 0.33;
-                let [x2, y2] = [x1 + (word_size-1) + 0.33, y1];
-                x2 = x1 + fraction*(x2-x1);
-                y2 = y1 + fraction*(y2-y1);
-                ctx.setLineDash(word_line_dash);
-                ctx.lineWidth = word_line_width;
-                ctx.beginPath();
-                ctx.moveTo(...project(x1, y1));
-                ctx.lineTo(...project(x2, y2));
-                ctx.stroke();
-            }
-            function draw(upto=-1, highlight=undefined) {
-                ctx.clearRect(0, 0, canvas_size[0], canvas_size[1]);
-                draw_grid(highlight);
-                draw_sequence(upto);
-            }
-            function animate_sequence() {
-                const progress_per_ms = sequence.length / animation_duration;
-                const upto = Math.min((Date.now() - animation_start_time) * progress_per_ms + 0.1,
-                                      sequence.length);
-                draw(upto);
-                if(upto < sequence.length) {
-                    requested_frames.push(window.requestAnimationFrame(animate_sequence));
-                }
-            }
-            function start_animation() {
-                animation_start_time = Date.now();
-                requested_frames.push(window.requestAnimationFrame(animate_sequence));
-            }
-            function cancel_animation() {
-                for(const frame_request of requested_frames) {
-                    window.cancelAnimationFrame(frame_request);
-                }
-                animation_frame = 0;
-            }
-
-            // Labels (drawn using CSS)
-            function place_label(id, x, y, text) {
-                const e = document.getElementById(id);
-                e.innerHTML = text;
-                e.style.visibility = 'visible';
-                e.style.display = 'block';
-                e.style.left = x + 'px';
-                e.style.top =  y + 'px';
-            }
-            function place_label_matrix_coords(id, x, y, text, anchor='NW') {
-                const e = document.getElementById(id);
-                const base_rect = canvas.getBoundingClientRect();
-                let [real_x, real_y] = project(x, y);
-                real_x = base_rect.left + real_x;
-                real_y = base_rect.top + real_y;
-                return place_label(id, real_x, real_y, text, anchor);
-            }
-            function hide_label(id) {
-                const e = document.getElementById(id);
-                e.style.visibility = 'hidden';
-            }
-
-
-            // /////////////////////////////////////////////////////////////////
-            // Interactivity / UI
-            // /////////////////////////////////////////////////////////////////
-
-            // Input Processing
-            function read_input_number_by_id(id) {
-                input_element = document.getElementById(id);
-                if(!input_element) {
-                    return error();
-                }
-                return parseInt(input_element.value);
-            }
-            function read_settings() {
-                let word_size_raw = read_input_number_by_id('word_size');
-                if(!word_size_raw in [1, 2, 4, 8]) {
-                    return error('Unsupported word size.');
-                }
-                word_size = word_size_raw;
-                const repetitions_checkbox = document.getElementById('repetitions');
-                show_repetitions = repetitions_checkbox.checked;
-                return true;
-            }
-            function read_input_dimensions() {
-                let [width, height] = [read_input_number_by_id('width'),
-                                       read_input_number_by_id('height')];
-                if(0 >= width) {
-                    return error('Width must be a positive number. (Got '+width+'.)');
-                }
-                if(0 >= height) {
-                    return error('Height must be a positive number. (Got '+width+'.)');
-                }
-                matrix_dims = [width*word_size, height];
-                return true;
-            }
-            function read_input_transforms() {
-                // The following relies heavily on the fact that the iteration
-                // over elements is in order of definition in the document. This
-                // gives us the dimensions and transforms in the right order.
-                transform_inputs = document.getElementsByClassName('transform');
-                clear(transforms)
-                for(const transform_input of transform_inputs) {
-                    stride_inputs = transform_input.getElementsByClassName('stride');
-                    wrap_inputs = transform_input.getElementsByClassName('wrap');
-                    if(stride_inputs.length != wrap_inputs.length) {
-                        return error();
-                    } 
-                    if(0 == stride_inputs.length) {
-                        return true;
-                    }
-                    transform = []
-                    for(const wrap_input of wrap_inputs) {
-                        const wrap = parseInt(wrap_input.value)
-                        if(0 >= wrap) {
-                            return error('Wrap ' + wrap_input.id + ' must be a positive number. (Got ' + wrap +'.)');
-                        }
-                        transform.push([wrap, 0])
-                    }
-                    for(var i = 0; i < stride_inputs.length; i++) {
-                        var stride_input = stride_inputs[i];
-                        const stride = parseInt(stride_input.value);
-                        if(0 > stride) {
-                            return error('Stride ' + stride_input.id + ' must be a non-negative number. (Got ' + stride + '.)');
-                        }
-                        transform[i][1] = stride;
-                    }
-                    transforms.push(transform);
-                }
-                return true;
-            }
-            function read_inputs() {
-                const success = read_settings() 
-                                && read_input_dimensions() 
-                                && read_input_transforms();
-                update_projection_parameters();
-                if(!success) {
-                    return false;
-                }
-                return true;
-            }
-
-            // Event handlers
-            function change(e=undefined) {
-                if(!read_inputs()) {
-                    return;
-                }
-                if(!calculate_sequence()) {
-                    return;
-                }
-                document.getElementById("code").innerHTML = 
-                    loop_repr_of_transforms(transforms);
-                cancel_animation();
-                start_animation();
-            }
-            function hover(e) {
-                const [n_cols, n_rows] = matrix_dims;
-                let [x, y] = relative_mouse_position(e);
-                let [col, row] = inv_project(x, y);
-                col = Math.trunc(col);
-                row = Math.trunc(row);
-                const index = round_to_word(col + row*n_cols);
-                if(index in reverse_sequence) {
-                    cancel_animation();
-                    // TODO: Give users a choice up to which repetition of the
-                    // element should be drawn if the same element is repeated.
-                    const upto = reverse_sequence[index][0];
-                    draw(upto, [col, row]);
-                    const index_text = (reverse_sequence[index].length == 1 ?
-                                        'Index' : 'Indices');
-                    const joined_indices = reverse_sequence[index].join(', ');
-                    place_label('mouse_label', e.clientX+10, e.clientY+20, 
-                                '<span>' + index_text + ': <span>' + joined_indices +'</span></span>');
-                    place_label_matrix_coords('col_label', round_to_word(col)+word_size, 0,
-                                              '<span>Column: <span>' + Math.trunc(col/word_size) + '</span></span>');
-                    place_label_matrix_coords('row_label', 0, row+1,
-                                              '<span>Row: <span>' + (row+1) + '</span></span>');
-                }
-            }
-            function mouseout() {
-                hide_label('mouse_label');
-                hide_label('col_label');
-                hide_label('row_label');
-                cancel_animation();
-                draw();
-            }
-            function resize() {
-                const canvas = document.getElementById('canvas');
-                const width = canvas.clientWidth;
-                canvas.width = width;
-                canvas.height = width;
-                canvas_size = [width, width];
-                cancel_animation();
-                update_projection_parameters();
-                draw();
-            }
-
             // Initialization
             function init() {
                 const inputs = document.getElementsByTagName('input');
                 for(const input of inputs){
                     input.addEventListener('change', change);
                 }
+                add_transforms_inputs_event_listeners();
                 const selects = document.getElementsByTagName('select');
                 for(const select of selects) {
                     select.addEventListener('change', change);
@@ -576,122 +68,51 @@
                 canvas.addEventListener('mouseout', mouseout);
                 window.addEventListener('resize', resize);
                 resize();
+                update_transforms_ui();
                 change();
             }
 
             window.addEventListener('load', init);
         </script>
-        <style>
-            body {
-                font-family: Helvetica, Arial, sans-serif;
-                padding: 1em 4em;
-            }
-            h1 {
-                margin-bottom: 30px;
-            }
-            #visualization_wrapper {
-                width: 70%;
-                min-width: 512px;
-                float: left;
-            }
-            #controls {
-                width: 30%;
-                min-width: 100px;
-                float: left;
-            }
-            #visualization {
-                margin-right: 4em;
-            }
-            #canvas { 
-                width: 100%;
-            }
-            label {
-                font-size: 0.9em;
-                padding: 10px 1px 1px 1px;
-            }
-            select, input {
-                text-align: right;
-                font-size: 1.1em;
-                font-family: Consolas, monospace;
-            }
-            #settings, .transform {
-                padding: 0.5em 2em;
-                margin-bottom: 1em;
-                margin-bottom: 1em;
-                background: #eee;
-                border-radius: 1em;
-            }
-            #settings input {
-                width: 4em;
-            }
-            .strides { 
-                width: 45%; padding-right: 5%; float: left;
-            }
-            .wraps {
-                width: 45%; padding-left: 5%; float: right;
-            }
-            .stride, .wrap {
-                width: 4em;
-            }
-            .transform {
-                display: block;
-                clear: both;
-                overflow: hidden;
-            }
-            .transform label {
-                width: 5em;
-                display: inline-block;
-            }
-            #code {
-                margin: 20px 0;
-                padding: 1em;
-                border: 2px solid #000;
-                clear: both;
-                font-family: Consolas, monospace;
-                color: #666;
-                white-space: pre;
-                border-radius: 1em;
-            }
-            #code span {
-                color: #000;
-            }
-            .hover_label {
-                display: hidden;
-                visibility: hidden;
-                position: absolute;
-            }
-            .hover_label>span{
-                display: block;
-                position: absolute;
-                white-space: nowrap;
-                text-transform: uppercase;
-                color: #444;
-                font-size: .75em;
-                padding: 3px;
-            }
-            .hover_label>span span {
-                font-size: 1.5em;
-                font-weight: bold;
-                font-family: Consolas, monospace;
-                color: #000;
-                text-transform: none;
-            }
-            #row_label>span, #col_label>span {
-                bottom: 1px;
-                right: 1px;
-            }
-            #mouse_label {
-                position: fixed;
-            }
-            #mouse_label>span {
-                background: #fff;
-                border: 1px solid #ccc;
-                border-radius: 3px;
-            }
-        </style>
+        <link rel="stylesheet" type="text/css" href="style.css" />
     </head>
     <body>
-        <h1>Data Layout Transformation Visualization</h1>
+        <div id="blurb">
+        <h1>Storing Matrices in Memory &mdash; Data Layout Visualizations</h1>
+        <p>There are many ways in which matrices &mdash; 
+           <em>two-dimensional</em> entities &mdash; can be laid out in 
+           <em>one-dimensional</em> computer memory. This page visualizes 
+           different such data layouts. To read these graphs, start from the top
+           left, and follow the colored line: This is the order in which memory 
+           is accessed with the selected layout.
+        </p>
+        <p>
+           The two most common ways to linearize a matrix are
+        <a href="javascript:
+                 set_transforms([[[matrix_dims[1], matrix_dims[0]], 
+                                  [matrix_dims[0],             1]]])">
+            row-major</a>
+            and
+        <a href="javascript:
+                 set_transforms([[[matrix_dims[0],             1], 
+                                  [matrix_dims[1], matrix_dims[0]]]])">
+            column-major</a>. Tiling, for example
+        <a href="javascript:
+                 set_transforms([[[Math.trunc(matrix_dims[1]/4), 
+                                                              matrix_dims[0]*4],
+                                  [4, Math.trunc(matrix_dims[0]/4)],
+                                  [4,               matrix_dims[0]], 
+                                  [4,                           1]]])">
+            4x4 row-major tiles</a>, or
+        <a href="javascript:
+                 set_transforms([[[Math.trunc(matrix_dims[1]/4), 
+                                                              matrix_dims[0]*4],
+                                  [Math.trunc(matrix_dims[0]/2), 2],
+                                  [2,              1], 
+                                  [4, matrix_dims[0]]]])">
+            4x2 column-major tiles</a>, can give better data locality.
+        </p>
+        </div>
         <div id="visualization_wrapper">
             <div id="visualization">
                 <canvas id="canvas"></canvas>
@@ -705,8 +126,26 @@
         <div id="controls">
             <div id="settings">
                 <p>
-                    <input type="number" id="height" value="16" /> &times;
-                    <input type="number" id="width" value="16" /> &times;
+                    <table>
+                        <tr>
+                            <td><label for="height">Rows</label></td>
+                            <td>&times;</td>
+                            <td><label for="width">Columns</label></td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <input type="number" id="height" value="16" />
+                            </td>
+                            <td>&times;</td>
+                            <td>
+                                <input type="number" id="width" value="16" />
+                            </td>
+                            </td>
+                        </tr>
+                    </table>
+                </p>
+                <p>
+                    <td><label for="word_size">Word Size</label></td>
                     <select id="word_size">
                         <option value="1" selected="selected">1 byte (char)</option>
                         <option value="2">2 bytes (short)</option>
@@ -719,43 +158,7 @@
                     <label for="repetitions">Show Repetitions</label>
                 </p>
             </div>
-            <div class="transform">
-                <div class="strides">
-                <p>
-                        <label for="stride_3">Stride 4</label>
-                        <input type="number" id="stride_3" value="64" class="stride" />
-                </p>
-                <p>
-                        <label for="stride_2">Stride 3</label>
-                        <input type="number" id="stride_2" value="4" class="stride" />
-                </p>
-                <p>
-                        <label for="stride_1">Stride 2</label>
-                        <input type="number" id="stride_1" value="16" class="stride" />
-                </p>
-                <p>
-                        <label for="stride_0">Stride 1</label>
-                        <input type="number" id="stride_0" value="1" class="stride" />
-                </p>
-                </div>
-                <div class="wraps">
-                <p>
-                        <label for="wrap_3">Wrap 4</label>
-                        <input type="number" id="wrap_3" value="4" class="wrap" />
-                </p>
-                <p>
-                        <label for="wrap_2">Wrap 3</label>
-                        <input type="number" id="wrap_2" value="4" class="wrap" />
-                </p>
-                <p>
-                        <label for="wrap_1">Wrap 2</label>
-                        <input type="number" id="wrap_1" value="4" class="wrap" />
-                </p>
-                <p>
-                        <label for="wrap_0">Wrap 1</label>
-                        <input type="number" id="wrap_0" value="4" class="wrap" />
-                </p>
-                </div>
+            <div id="transforms">
             </div>
             <p id="code"></p>
         </div>

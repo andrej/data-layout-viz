@@ -1,0 +1,124 @@
+body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    padding: 1em 4em;
+}
+#blurb {
+    margin-bottom: 4em;
+    line-height: 1.4;
+}
+#blurb p {
+    font-size: 1.1em;
+    color: #444;
+}
+#blurb a, #blurb a:visited{
+    color: #06c;
+}
+#blurb a:hover {
+    color: #09f;
+}
+#visualization_wrapper {
+    width: 70%;
+    min-width: 512px;
+    float: left;
+}
+#controls {
+    width: 30%;
+    min-width: 100px;
+    float: left;
+}
+#visualization {
+    margin-right: 4em;
+}
+#canvas { 
+    width: 100%;
+}
+label {
+    font-size: 0.8em;
+    text-transform: uppercase;
+    color: #666;
+    padding: 10px 1px 1px 1px;
+}
+select, input {
+    text-align: right;
+    font-size: 1em;
+    font-family: Consolas, monospace;
+}
+#settings, .transform {
+    padding: 0.5em 2em;
+    margin-bottom: 1em;
+    margin-bottom: 1em;
+    background: #eee;
+    border-radius: 1em;
+}
+#settings input {
+    width: 4em;
+}
+.transform {
+    display: block;
+    width: 100%;
+}
+.transform label {
+    margin-right: 10px;
+}
+.transform td.transform_title {
+    width: 100%;
+    text-transform: uppercase;
+    font-weight: 444;
+    color: #666;
+}
+.transform button {
+    min-width: 20px;
+    text-align: center;
+    font-weight: bold;
+}
+.stride, .wrap {
+    width: 3em;
+    font-size: 1.15em;
+    padding: .1em .2em;
+}
+#code {
+    margin: 20px 0;
+    padding: 1em;
+    border: 2px solid #000;
+    clear: both;
+    font-family: Consolas, monospace;
+    color: #666;
+    white-space: pre;
+    border-radius: 1em;
+}
+#code span {
+    color: #000;
+}
+.hover_label {
+    display: hidden;
+    visibility: hidden;
+    position: absolute;
+}
+.hover_label>span{
+    display: block;
+    position: absolute;
+    white-space: nowrap;
+    text-transform: uppercase;
+    color: #444;
+    font-size: .75em;
+    padding: 3px;
+}
+.hover_label>span span {
+    font-size: 1.5em;
+    font-weight: bold;
+    font-family: Consolas, monospace;
+    color: #000;
+    text-transform: none;
+}
+#row_label>span, #col_label>span {
+    bottom: 1px;
+    right: 1px;
+}
+#mouse_label {
+    position: fixed;
+}
+#mouse_label>span {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
