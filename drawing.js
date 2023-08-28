@@ -180,15 +180,21 @@ function draw_connection(index_1, index_2, p_1, p_2, fraction) {
         ctx.lineWidth = connection_line_width;
         ctx.beginPath();
         ctx.moveTo(...project(x1, y1));
-        const x_diff_sgn = (x1-x2 < 0 ? -1 : 1)
-        const y_diff = y1-y2
+        const x_diff = x1-x2;
+        const x_diff_sgn = (x1-x2 < 0 ? -1 : 1);
+        const y_diff = y1-y2;
         if(Math.abs(y1-y2) < 0.75) { // Horizontal jump; draw an arc
             ctx.bezierCurveTo(...project(x1-x_diff_sgn*0.33, y1-0.33),
                               ...project(x2+x_diff_sgn*0.33, y1-0.33),
                               ...project(x2, y2));
-        } else { // Jump includes vertical component
+        } else if(x_diff > 0) { 
+            // Jumping left in the X dimension
             ctx.bezierCurveTo(...project(x1, y1-0.33*y_diff),
                               ...project(x2, y2+0.33*y_diff),
+                              ...project(x2, y2));
+        } else {
+            ctx.bezierCurveTo(...project(x1-0.33*x_diff, y1),
+                              ...project(x2+0.33*x_diff, y2),
                               ...project(x2, y2));
         }
         stroke_with_halo(2*ctx.lineWidth);

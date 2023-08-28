@@ -52,6 +52,18 @@ function update_transforms_ui() {
             stride_input_el.className = 'stride';
             stride_input_el.value = stride;
             stride_input_el.type = 'number';
+            if(j > 0) {
+                const move_up_el = document.createElement('button');
+                td_3_el.appendChild(move_up_el);
+                move_up_el.innerText = '↑';
+                move_up_el.addEventListener('click', function(){swap_dimensions(i, j, j-1);});
+            }
+            if(j < transform.length - 1) {
+                const move_up_el = document.createElement('button');
+                td_3_el.appendChild(move_up_el);
+                move_up_el.innerText = '↓';
+                move_up_el.addEventListener('click', function(){swap_dimensions(i, j, j+1);});
+            }
             const remove_dim_el = document.createElement('button');
             td_3_el.appendChild(remove_dim_el);
             remove_dim_el.innerText = '-';
@@ -231,10 +243,18 @@ function add_transform() {
 function add_dimension(i) {
     transforms[i].unshift([1, 0]);
     update_transforms_ui();
+    update_output();
 }
 
 function remove_dimension(i, j) {
     transforms[i].splice(j, 1);
+    update_transforms_ui();
+    update_output();
+}
+
+function swap_dimensions(i, j_1, j_2) {
+    const [dimension_1, dimension_2] = [transforms[i][j_1], transforms[i][j_2]];
+    [transforms[i][j_2], transforms[i][j_1]] = [dimension_1, dimension_2];
     update_transforms_ui();
     update_output();
 }

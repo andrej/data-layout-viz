@@ -70,8 +70,11 @@ select, input {
     display: block;
     width: 100%;
 }
+.transform td {
+    width: 33%;
+}
 .transform td:last-child {
-    width: 100%;
+    min-width: 70px;
     text-align: right;
 }
 .transform td.transform_title {
@@ -81,7 +84,10 @@ select, input {
     color: #666;
 }
 .transform button {
+    font-size: .9em;
     min-width: 20px;
+    margin: 0 1px;
+    padding: 1px;
     text-align: center;
     font-weight: bold;
 }
