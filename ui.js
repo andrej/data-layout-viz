@@ -15,8 +15,12 @@ function update_transforms_ui() {
         transform_el.appendChild(head_tr_el);
         const head_td_1_el = document.createElement('td');
         head_tr_el.appendChild(head_td_1_el);
-        head_td_1_el.colSpan = 2;
         head_td_1_el.className = 'transform_title';
+        head_td_1_el.innerText = 'Wraps';
+        const head_td_2_el = document.createElement('td');
+        head_tr_el.appendChild(head_td_2_el);
+        head_td_2_el.className = 'transform_title';
+        head_td_2_el.innerText = 'Strides';
         const head_td_3_el = document.createElement('td');
         head_tr_el.appendChild(head_td_3_el);
         const add_dim_el = document.createElement('button');
@@ -35,10 +39,6 @@ function update_transforms_ui() {
             const td_3_el = document.createElement('td');
             tr_el.appendChild(td_3_el);
             const wrap_id = 'transform_' + i + '_wrap_' + j;
-            const wrap_label_el = document.createElement('label');
-            td_1_el.appendChild(wrap_label_el);
-            wrap_label_el.for = wrap_id;
-            wrap_label_el.innerText = 'Wrap ' + j;
             const wrap_input_el = document.createElement('input');
             td_1_el.appendChild(wrap_input_el);
             wrap_input_el.id = wrap_id;
@@ -46,10 +46,6 @@ function update_transforms_ui() {
             wrap_input_el.value = wrap;
             wrap_input_el.type = 'number';
             const stride_id = 'transform_' + i + '_stride_' + j;
-            const stride_label_el = document.createElement('label');
-            td_2_el.appendChild(stride_label_el);
-            stride_label_el.for = stride_id;
-            stride_label_el.innerText = 'Stride ' + j;
             const stride_input_el = document.createElement('input');
             td_2_el.appendChild(stride_input_el);
             stride_input_el.id = stride_id;

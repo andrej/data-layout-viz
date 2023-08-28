@@ -1,10 +1,20 @@
 body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    padding: 1em 4em;
+    padding: 0;
+    margin: 0;
+}
+#wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 3em;
 }
 #blurb {
     margin-bottom: 4em;
     line-height: 1.4;
+    font-size: 0.9em;
+}
+#blurb :first-child {
+    margin-top: 0;
 }
 #blurb p {
     font-size: 1.1em;
@@ -44,7 +54,7 @@ select, input {
     font-family: Consolas, monospace;
 }
 #settings, .transform {
-    padding: 0.5em 2em;
+    padding: 0.5em 1em;
     margin-bottom: 1em;
     margin-bottom: 1em;
     background: #eee;
@@ -53,15 +63,19 @@ select, input {
 #settings input {
     width: 4em;
 }
+#settings :last-child {
+    margin-bottom: 0;
+}
 .transform {
     display: block;
     width: 100%;
 }
-.transform label {
-    margin-right: 10px;
+.transform td:last-child {
+    width: 100%;
+    text-align: right;
 }
 .transform td.transform_title {
-    width: 100%;
+    font-size: 0.8em;
     text-transform: uppercase;
     font-weight: 444;
     color: #666;
@@ -72,16 +86,16 @@ select, input {
     font-weight: bold;
 }
 .stride, .wrap {
-    width: 3em;
-    font-size: 1.15em;
-    padding: .1em .2em;
+    width: 4em;
+    margin-right: 1em;
 }
 #code {
     margin: 20px 0;
     padding: 1em;
-    border: 2px solid #000;
+    border: 2px solid #ccc;
     clear: both;
     font-family: Consolas, monospace;
+    font-size: 0.9em;
     color: #666;
     white-space: pre;
     border-radius: 1em;

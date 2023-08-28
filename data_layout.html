@@ -76,42 +76,47 @@
         </script>
         <link rel="stylesheet" type="text/css" href="style.css" />
     </head>
-    <body>
+    <body><div id="wrap">
         <div id="blurb">
-        <h1>Storing Matrices in Memory &mdash; Data Layout Visualizations</h1>
-        <p>There are many ways in which matrices &mdash; 
-           <em>two-dimensional</em> entities &mdash; can be laid out in 
-           <em>one-dimensional</em> computer memory. This page visualizes 
-           different such data layouts. To read these graphs, start from the top
-           left, and follow the colored line: This is the order in which memory 
-           is accessed with the selected layout.
-        </p>
-        <p>
-           The two most common ways to linearize a matrix are
-        <a href="javascript:
-                 set_transforms([[[matrix_dims[1], matrix_dims[0]], 
-                                  [matrix_dims[0],             1]]])">
-            row-major</a>
-            and
-        <a href="javascript:
-                 set_transforms([[[matrix_dims[0],             1], 
-                                  [matrix_dims[1], matrix_dims[0]]]])">
-            column-major</a>. Tiling, for example
-        <a href="javascript:
-                 set_transforms([[[Math.trunc(matrix_dims[1]/4), 
-                                                              matrix_dims[0]*4],
-                                  [4, Math.trunc(matrix_dims[0]/4)],
-                                  [4,               matrix_dims[0]], 
-                                  [4,                           1]]])">
-            4x4 row-major tiles</a>, or
-        <a href="javascript:
-                 set_transforms([[[Math.trunc(matrix_dims[1]/4), 
-                                                              matrix_dims[0]*4],
-                                  [Math.trunc(matrix_dims[0]/2), 2],
-                                  [2,              1], 
-                                  [4, matrix_dims[0]]]])">
-            4x2 column-major tiles</a>, can give better data locality.
-        </p>
+            <h1>Storing Matrices in Memory &mdash; Data Layout Visualizations</h1>
+            <p>There are many ways in which matrices &mdash; 
+            <em>two-dimensional</em> entities &mdash; can be laid out in 
+            <em>one-dimensional</em> computer memory. This page visualizes 
+            different such data layouts. To read these graphs, start from the top
+            left, and follow the colored line: This shows the order in which 
+            memory is accessed. Each small gray square is one byte. A solid 
+            colored line is a memory access; a dashed one is a jump to a 
+            different address. Adjust the wraps and strides to the right to 
+            explore different transformations.
+            </p>
+            <p>
+            Some examples: The two most common ways to linearize a matrix are
+            <a href="javascript:
+                    set_transforms([[[matrix_dims[1], 
+                                      Math.trunc(matrix_dims[0]/word_size)], 
+                                    [matrix_dims[0],             1]]])">
+                row-major</a>
+                and
+            <a href="javascript:
+                    set_transforms([[[Math.trunc(matrix_dims[0]/word_size), 1], 
+                                    [matrix_dims[1], 
+                                     Math.trunc(matrix_dims[0]/word_size)]]])">
+                column-major</a>. Tiling, for example
+            <a href="javascript:
+                    set_transforms([[[Math.trunc(matrix_dims[1]/4), 
+                                      Math.trunc(matrix_dims[0]/word_size)*4],
+                                    [4, Math.trunc(matrix_dims[0]/word_size/4)],
+                                    [4, Math.trunc(matrix_dims[0]/word_size)], 
+                                    [4, 1]]])">
+                4x4 row-major tiles</a>, or
+            <a href="javascript:
+                    set_transforms([[[Math.trunc(matrix_dims[0]/word_size/2), 2],
+                                    [Math.trunc(matrix_dims[1]/4), 
+                                     Math.trunc(matrix_dims[0]/word_size)*4],
+                                    [2, 1], 
+                                    [4, Math.trunc(matrix_dims[0]/word_size)]]])">
+                4x2 column-major tiles</a>, can give better data locality.
+            </p>
         </div>
         <div id="visualization_wrapper">
             <div id="visualization">
@@ -125,25 +130,23 @@
         </div>
         <div id="controls">
             <div id="settings">
-                <p>
-                    <table>
-                        <tr>
-                            <td><label for="height">Rows</label></td>
-                            <td>&times;</td>
-                            <td><label for="width">Columns</label></td>
-                        </tr>
-                        <tr>
-                            <td>
-                                <input type="number" id="height" value="16" />
-                            </td>
-                            <td>&times;</td>
-                            <td>
-                                <input type="number" id="width" value="16" />
-                            </td>
-                            </td>
-                        </tr>
-                    </table>
-                </p>
+                <table>
+                    <tr>
+                        <td><label for="height">Rows</label></td>
+                        <td>&times;</td>
+                        <td><label for="width">Columns</label></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <input type="number" id="height" value="16" />
+                        </td>
+                        <td>&times;</td>
+                        <td>
+                            <input type="number" id="width" value="16" />
+                        </td>
+                        </td>
+                    </tr>
+                </table>
                 <p>
                     <td><label for="word_size">Word Size</label></td>
                     <select id="word_size">
@@ -162,5 +165,5 @@
             </div>
             <p id="code"></p>
         </div>
-    </body>
+    </div></body>
 </html>
